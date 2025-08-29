@@ -38,37 +38,67 @@ class Myfaiss:
             print(f"[Myfaiss] Warning: Cannot load index from {bin_file}: {e}")
             self.index = None
 
-    def build_index_from_images(self, save_path=None, verbose=True):
+    def build_index_from_images(self, save_path=None, verbose=True, batch_size=64, use_gpu=True, nlist=256):
         """
         Build FAISS index from all images in self.id2img_fps.
-        save_path: path to save the index file (default: self.bin_file)
+        - Batch encode images for speed.
+        - Use IndexIVFFlat for faster search on large datasets.
+        - Optionally use GPU if available.
         """
         import torch
+        from tqdm import tqdm
         image_paths = [self.id2img_fps[k] for k in sorted(self.id2img_fps.keys())]
         features = []
-        for idx, img_path in enumerate(image_paths):
-            try:
-                image = Image.open(img_path).convert("RGB")
-                image_input = self.preprocess(image).unsqueeze(0).to(self.device)
-                with torch.no_grad():
-                    feat = self.model.encode_image(image_input).cpu().numpy().astype(np.float32)
-                features.append(feat[0])
-                if verbose and (idx % 20 == 0):
-                    print(f"Processed {idx+1}/{len(image_paths)} images...")
-            except Exception as e:
-                print(f"[Myfaiss] Error processing {img_path}: {e}")
-                features.append(np.zeros((self.model.visual.output_dim,), dtype=np.float32))
-        feats_np = np.stack(features)
+        total = len(image_paths)
+        # Batch encode with tqdm
+        for start in tqdm(range(0, total, batch_size), desc="Encoding images", unit="batch"):
+            end = min(start + batch_size, total)
+            batch_imgs = []
+            for img_path in image_paths[start:end]:
+                try:
+                    image = Image.open(img_path).convert("RGB")
+                    batch_imgs.append(self.preprocess(image))
+                except Exception as e:
+                    print(f"[Myfaiss] Error processing {img_path}: {e}")
+                    batch_imgs.append(torch.zeros((3, 224, 224)))
+            batch_tensor = torch.stack(batch_imgs).to(self.device)
+            with torch.no_grad():
+                feats = self.model.encode_image(batch_tensor).cpu().numpy().astype(np.float32)
+            features.append(feats)
+            if verbose:
+                print(f"Processed {end}/{total} images...")
+        feats_np = np.concatenate(features, axis=0)
         dim = feats_np.shape[1]
-        index = faiss.IndexFlatL2(dim)
-        index.add(feats_np)
-        self.index = index
+        # FAISS index
+        if use_gpu:
+            try:
+                import faiss.contrib.torch_utils
+                res = faiss.StandardGpuResources()
+                quantizer = faiss.IndexFlatL2(dim)
+                index = faiss.IndexIVFFlat(quantizer, dim, nlist, faiss.METRIC_L2)
+                index.train(feats_np)
+                gpu_index = faiss.index_cpu_to_gpu(res, 0, index)
+                gpu_index.add(feats_np)
+                self.index = faiss.index_gpu_to_cpu(gpu_index)
+            except Exception as e:
+                print(f"[Myfaiss] GPU indexing failed, fallback to CPU: {e}")
+                quantizer = faiss.IndexFlatL2(dim)
+                index = faiss.IndexIVFFlat(quantizer, dim, nlist, faiss.METRIC_L2)
+                index.train(feats_np)
+                index.add(feats_np)
+                self.index = index
+        else:
+            quantizer = faiss.IndexFlatL2(dim)
+            index = faiss.IndexIVFFlat(quantizer, dim, nlist, faiss.METRIC_L2)
+            index.train(feats_np)
+            index.add(feats_np)
+            self.index = index
         if save_path is None:
             save_path = self.bin_file
-        faiss.write_index(index, save_path)
+        faiss.write_index(self.index, save_path)
         if verbose:
-            print(f"[Myfaiss] FAISS index built and saved to {save_path}")
-        return index
+            print(f"[Myfaiss] FAISS index (IVF) built and saved to {save_path}")
+        return self.index
 
     def load_bin_file(self, bin_file: str):
         return faiss.read_index(bin_file)
