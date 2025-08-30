@@ -143,10 +143,10 @@
             const ctx = canvas.getContext('2d');
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             const dataURL = canvas.toDataURL('image/png');
-            const frameNum = Math.floor(video.currentTime * (video.frameRate || 25));
+            const frameNum = Math.floor(video.currentTime * actualFPS);
             // Show preview, video name, frame number, and download link
             document.getElementById('capture-result').innerHTML =
-                `<div style='margin-bottom:8px;'><b>Video:</b> ${videoName} &nbsp; <b>Frame:</b> ${frameNum} &nbsp; <b>Time:</b> ${video.currentTime.toFixed(2)}s</div>`+
+                `<div style='margin-bottom:8px;'><b>Video:</b> ${videoName} &nbsp; <b>Frame:</b> ${frameNum} &nbsp; <b>Time:</b> ${video.currentTime.toFixed(2)}s &nbsp; <b>FPS:</b> ${actualFPS.toFixed(2)}</div>`+
                 `<img src="${dataURL}" style="max-width:400px; border:1px solid #ccc; border-radius:6px; margin-bottom:10px;"/><br>`+
                 `<a href="${dataURL}" download="frame_${videoName}_${frameNum}.png" class="control-btn" style="background:#28a745;">Download Frame</a>`;
         }
@@ -161,9 +161,27 @@
         const frameNumber = urlParams.get('frame') || '0';
         const startTime = parseFloat(urlParams.get('time')) || 0;
         
-        // Construct video path - videos stored in /home/nguyennn263/Documents/AIC/Dataset/Videos/video
-        const videoPath = `/videos/${videoName}.mp4`;
+        // Global variable for actual FPS
+        let actualFPS = 25; // Default fallback
         
+        // Get actual video info from API
+        fetch(`/api/video_info/${videoName}`)
+            .then(response => response.json())
+            .then(data => {
+                actualFPS = data.fps || 25;
+                console.log(`Actual FPS: ${actualFPS}`);
+                // Update video details with real info
+                videoDetails.innerHTML = `
+                    <p><strong>Frame:</strong> ${frameNumber} | <strong>Start Time:</strong> ${startTime.toFixed(2)}s | <strong>FPS:</strong> ${actualFPS.toFixed(2)}</p>
+                `;
+            })
+            .catch(error => {
+                console.warn('Could not get video FPS, using default 25:', error);
+            });
+        
+        // Construct video path - videos served from /videos mount point
+        const videoPath = `/videos/${videoName}.mp4`;
+
         // Update UI
         videoTitle.textContent = `Playing: ${videoName}.mp4`;
         videoDetails.innerHTML = `
@@ -174,9 +192,18 @@
         videoSource.src = videoPath;
         video.load();
         
-        // Set start time when video loads
+        // Set start time when video loads and get actual FPS
         video.addEventListener('loadedmetadata', function() {
             video.currentTime = startTime;
+            
+            // Try to get actual video FPS (not always available)
+            if (video.videoWidth && video.videoHeight) {
+                // Update max time input
+                document.getElementById('jumpTime').max = Math.floor(video.duration);
+                
+                // Log video info for debugging
+                console.log(`Video: ${videoName}, Duration: ${video.duration}s, Size: ${video.videoWidth}x${video.videoHeight}`);
+            }
         });
         
         // Control functions

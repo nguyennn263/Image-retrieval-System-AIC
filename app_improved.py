@@ -8,6 +8,7 @@ import json
 import cv2
 import numpy as np
 import os
+from dotenv import load_dotenv
 from PIL import Image
 import logging
 import traceback
@@ -63,12 +64,16 @@ if UTILS_AVAILABLE:
         logger.error(f"Error initializing FAISS: {e}")
         MyFaiss = None
 
+# Load .env
+load_dotenv()
+VIDEO_FOLDER = os.getenv("VIDEO_FOLDER", "path_to_your_video_folder")
+
 # Mount static files - order matters!
 app.mount("/images", StaticFiles(directory="images"), name="images")
-app.mount("/videos", StaticFiles(directory="/home/nguyennn263/Documents/AIC/Dataset/Videos/video"), name="videos")
+app.mount("/videos", StaticFiles(directory=VIDEO_FOLDER), name="videos")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Pydantic models
+# Pydantic models-
 class ImageSearchRequest(BaseModel):
     image_id: int
     k: int = 200
@@ -91,10 +96,6 @@ async def index():
 async def view_frame():
     return FileResponse("static/view_new.html")
 
-@app.get("/vid", response_class=HTMLResponse)
-async def view_video():
-    return FileResponse("static/vid_new.html")
-
 @app.get("/view", response_class=HTMLResponse)
 async def view_image(request: Request, keyframe: str):
     return templates.TemplateResponse("view.html", {
@@ -103,13 +104,8 @@ async def view_image(request: Request, keyframe: str):
     })
 
 @app.get("/vid", response_class=HTMLResponse)
-async def view_video(request: Request, folderName: str, videoPath: str, time: float):
-    return templates.TemplateResponse("vid.html", {
-        "request": request,
-        "folderName": folderName,
-        "videoPath": videoPath,
-        "time": time
-    })
+async def view_video():
+    return FileResponse("static/vid_new.html")
 
 @app.get("/api/image_paths")
 async def get_image_paths():
@@ -213,6 +209,39 @@ async def upload_search(image: UploadFile = File(...), k: int = 200):
         return {"results": results}
     except Exception as e:
         logger.error(f"Error in upload search: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/video_info/{video_name}")
+async def get_video_info(video_name: str):
+    """Get video metadata including FPS"""
+    try:
+        video_path = os.path.join(VIDEO_FOLDER, f"{video_name}.mp4")
+        if not os.path.exists(video_path):
+            raise HTTPException(status_code=404, detail="Video not found")
+        
+        # Use opencv to get video info
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise HTTPException(status_code=500, detail="Cannot open video")
+        
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration = frame_count / fps if fps > 0 else 0
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        
+        cap.release()
+        
+        return {
+            "video_name": video_name,
+            "fps": fps,
+            "frame_count": frame_count,
+            "duration": duration,
+            "width": width,
+            "height": height
+        }
+    except Exception as e:
+        logger.error(f"Error getting video info: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/health")

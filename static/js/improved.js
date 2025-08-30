@@ -650,32 +650,6 @@ class ImageSearchApp {
         window.open(`/view?keyframe=${encodeURIComponent(imagePath)}`, '_blank');
     }
 
-    // Enhanced video viewing
-    async viewClip(imageId, video, frame) {
-        try {
-            // Show loading for video preparation
-            this.showLoading(true, 'Preparing video...');
-            
-            const videoPath = `images/keyframes/${video}.mp4`;
-            const frameNum = parseInt(frame) || 0;
-            const fps = 25; // Default FPS
-            const timeSeconds = frameNum / fps;
-            
-            // Open in new tab with better URL encoding
-            const url = `/vid?folderName=${encodeURIComponent(video)}&videoPath=${encodeURIComponent(videoPath)}&time=${timeSeconds}`;
-            window.open(url, '_blank');
-            
-            this.updateStatus(`🎥 Playing video ${video} at frame ${frame} (${timeSeconds.toFixed(2)}s)`);
-            
-        } catch (error) {
-            console.error('Error playing video:', error);
-            this.updateStatus('Error playing video');
-            this.showToast('Error playing video', 'error');
-        } finally {
-            this.showLoading(false);
-        }
-    }
-
     // Toast notifications for better UX
     showToast(message, type = 'info') {
         const toast = document.createElement('div');
@@ -716,16 +690,26 @@ class ImageSearchApp {
 
     async viewClip(imageId, video, frame) {
         try {
-            // Video từ /home/nguyennn263/Documents/AIC/Dataset/Videos/video
+            // Get actual video FPS from API
+            let fps = 25; // Default fallback
+            try {
+                const response = await fetch(`/api/video_info/${video}`);
+                if (response.ok) {
+                    const videoInfo = await response.json();
+                    fps = videoInfo.fps || 25;
+                }
+            } catch (error) {
+                console.warn('Could not get video FPS, using default 25:', error);
+            }
+            
             const frameNum = parseInt(frame) || 0;
-            const fps = 25; // Giả định 25fps
             const timeSeconds = frameNum / fps;
             
-            // Open video player
+            // Open video player với vid route
             const videoUrl = `/vid?video=${video}&frame=${frame}&time=${timeSeconds}`;
             window.open(videoUrl, '_blank');
             
-            this.updateStatus(`Opening video ${video} at frame ${frame} (${timeSeconds.toFixed(2)}s)`);
+            this.updateStatus(`Opening video ${video} at frame ${frame} (${timeSeconds.toFixed(2)}s, ${fps.toFixed(2)} FPS)`);
         } catch (error) {
             console.error('Error opening video:', error);
             this.updateStatus('Error opening video');
