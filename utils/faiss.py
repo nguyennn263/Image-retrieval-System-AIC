@@ -118,8 +118,30 @@ class Myfaiss:
 
         plt.show()
         
-    def image_search(self, id_query, k): 
-        query_feats = self.index.reconstruct(id_query).reshape(1,-1)
+    def image_search(self, query, k, is_path=True): 
+        if is_path:
+            # Search by image ID (original behavior)
+            query_feats = self.index.reconstruct(query).reshape(1,-1)
+        else:
+            # Search by image array (new behavior for uploaded images)
+            import torch
+            if isinstance(query, np.ndarray):
+                # Convert numpy array to PIL Image
+                from PIL import Image
+                if len(query.shape) == 3:
+                    if query.shape[2] == 3:  # RGB
+                        pil_image = Image.fromarray(query)
+                    else:  # BGR
+                        pil_image = Image.fromarray(query[:,:,::-1])
+                else:
+                    raise ValueError("Invalid image shape")
+            else:
+                pil_image = query
+            
+            # Get features
+            image_input = self.preprocess(pil_image).unsqueeze(0).to(self.device)
+            with torch.no_grad():
+                query_feats = self.model.encode_image(image_input).cpu().numpy().astype(np.float32)
 
         scores, idx_image = self.index.search(query_feats, k=k)
         idx_image = idx_image.flatten()

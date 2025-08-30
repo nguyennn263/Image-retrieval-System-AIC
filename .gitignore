@@ -142,3 +142,7 @@ Database/
 
 
 images/
+
+faiss_normal_ViT.bin
+
+image_path.json

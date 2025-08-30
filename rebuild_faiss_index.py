@@ -1,16 +1,16 @@
 import json
 from utils.query_processing import Translation
 from utils.faiss import Myfaiss
-
+image_path = "/home/nguyennn263/Documents/AIC/Dataset/MyKeyframes"
 # Load image paths
 with open('image_path.json') as json_file:
     json_dict = json.load(json_file)
 
-DictImagePath = {int(key): value for key, value in json_dict.items()}
+DictImagePath = {int(key): f"{image_path}/{value}" for key, value in json_dict.items()}
 bin_file = 'faiss_normal_ViT.bin'
 
 # Khởi tạo Myfaiss
-MyFaiss = Myfaiss(bin_file, DictImagePath, 'cpu', Translation(), "ViT-B/32")
+MyFaiss = Myfaiss(bin_file, DictImagePath, 'cuda', Translation(), "ViT-B/32")
 
 # Xoá index cũ (clear)
 print("Clearing old FAISS index...")
@@ -21,3 +21,4 @@ print("Building new FAISS index from images...")
 MyFaiss.build_index_from_images()
 
 print("Done! FAISS index has been rebuilt and saved.")
+

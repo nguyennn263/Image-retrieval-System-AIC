@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Viewer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .video-header {
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #eee;
+        }
+        .video-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .video-container {
+            text-align: center;
+            margin: 20px 0;
+        }
+        video {
+            max-width: 100%;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin: 20px 0;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .control-btn {
+            padding: 8px 15px;
+            border: none;
+            border-radius: 5px;
+            background: #007bff;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .control-btn:hover {
+            background: #0056b3;
+        }
+        .time-input {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            width: 100px;
+        }
+        .shortcuts {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+        .shortcuts h4 {
+            margin-top: 0;
+        }
+        .shortcut-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+        }
+        .back-btn {
+            background: #6c757d;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="video-header">
+            <div class="video-info">
+                <h1 id="video-title">Video Viewer</h1>
+                <a href="/" class="back-btn">← Back to Search</a>
+            </div>
+            <div id="video-details"></div>
+        </div>
+
+        <div class="video-container">
+            <video id="videoPlayer" controls width="800">
+                <source id="videoSource" type="video/mp4">
+                Your browser does not support the video tag.
+            </video>
+        </div>
+
+        <div class="controls">
+            <button class="control-btn" onclick="seekVideo(-10)">-10s</button>
+            <button class="control-btn" onclick="seekVideo(-5)">-5s</button>
+            <button class="control-btn" onclick="togglePlay()">Play/Pause</button>
+            <button class="control-btn" onclick="seekVideo(5)">+5s</button>
+            <button class="control-btn" onclick="seekVideo(10)">+10s</button>
+            <input type="number" class="time-input" id="jumpTime" placeholder="Seconds" min="0">
+            <button class="control-btn" onclick="jumpToTime()">Jump to</button>
+            <button class="control-btn" onclick="captureFrame()">Capture Frame</button>
+        </div>
+
+        <div id="capture-result" style="text-align:center; margin-top:20px;"></div>
+        </div>
+
+        <div class="shortcuts">
+            <h4>Keyboard Shortcuts:</h4>
+            <div class="shortcut-grid">
+                <div><strong>Space/K:</strong> Play/Pause</div>
+                <div><strong>J:</strong> -10 seconds</div>
+                <div><strong>L:</strong> +10 seconds</div>
+                <div><strong>← →:</strong> -5/+5 seconds</div>
+                <div><strong>0-9:</strong> Jump to 0%-90%</div>
+                <div><strong>M:</strong> Mute/Unmute</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Capture frame logic
+        function captureFrame() {
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const dataURL = canvas.toDataURL('image/png');
+            const frameNum = Math.floor(video.currentTime * (video.frameRate || 25));
+            // Show preview, video name, frame number, and download link
+            document.getElementById('capture-result').innerHTML =
+                `<div style='margin-bottom:8px;'><b>Video:</b> ${videoName} &nbsp; <b>Frame:</b> ${frameNum} &nbsp; <b>Time:</b> ${video.currentTime.toFixed(2)}s</div>`+
+                `<img src="${dataURL}" style="max-width:400px; border:1px solid #ccc; border-radius:6px; margin-bottom:10px;"/><br>`+
+                `<a href="${dataURL}" download="frame_${videoName}_${frameNum}.png" class="control-btn" style="background:#28a745;">Download Frame</a>`;
+        }
+        const video = document.getElementById('videoPlayer');
+        const videoSource = document.getElementById('videoSource');
+        const videoTitle = document.getElementById('video-title');
+        const videoDetails = document.getElementById('video-details');
+        
+        // Parse URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const videoName = urlParams.get('video') || 'Unknown';
+        const frameNumber = urlParams.get('frame') || '0';
+        const startTime = parseFloat(urlParams.get('time')) || 0;
+        
+        // Construct video path - videos stored in /home/nguyennn263/Documents/AIC/Dataset/Videos/video
+        const videoPath = `/videos/${videoName}.mp4`;
+        
+        // Update UI
+        videoTitle.textContent = `Playing: ${videoName}.mp4`;
+        videoDetails.innerHTML = `
+            <p><strong>Frame:</strong> ${frameNumber} | <strong>Start Time:</strong> ${startTime.toFixed(2)}s</p>
+        `;
+        
+        // Set video source
+        videoSource.src = videoPath;
+        video.load();
+        
+        // Set start time when video loads
+        video.addEventListener('loadedmetadata', function() {
+            video.currentTime = startTime;
+        });
+        
+        // Control functions
+        function togglePlay() {
+            if (video.paused) {
+                video.play();
+            } else {
+                video.pause();
+            }
+        }
+        
+        function seekVideo(seconds) {
+            video.currentTime = Math.max(0, Math.min(video.duration || 0, video.currentTime + seconds));
+        }
+        
+        function jumpToTime() {
+            const time = parseFloat(document.getElementById('jumpTime').value);
+            if (!isNaN(time)) {
+                video.currentTime = Math.max(0, Math.min(video.duration || 0, time));
+            }
+        }
+        
+    // Keyboard shortcuts
+        document.addEventListener('keydown', function(event) {
+            if (event.target.tagName.toLowerCase() === 'input') return;
+            
+            switch(event.key.toLowerCase()) {
+                case ' ':
+                case 'k':
+                    event.preventDefault();
+                    togglePlay();
+                    break;
+                case 'j':
+                    seekVideo(-10);
+                    break;
+                case 'l':
+                    seekVideo(10);
+                    break;
+                case 'arrowleft':
+                    seekVideo(-5);
+                    break;
+                case 'arrowright':
+                    seekVideo(5);
+                    break;
+                case 'm':
+                    video.muted = !video.muted;
+                    break;
+                case '0': case '1': case '2': case '3': case '4':
+                case '5': case '6': case '7': case '8': case '9':
+                    const percent = parseInt(event.key) * 10;
+                    video.currentTime = (video.duration || 0) * (percent / 100);
+                    break;
+            }
+        });
+        
+        // Update jump time input max when duration is known
+        video.addEventListener('loadedmetadata', function() {
+            document.getElementById('jumpTime').max = Math.floor(video.duration);
+        });
+    </script>
+</body>
+</html>

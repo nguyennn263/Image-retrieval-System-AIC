@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Video Viewer - YVT</title>
+    </head>
+    <body>
+        <h1>Playing Video: {{folderName}}.mp4</h1>
+        <video id="videoPlayer" controls autoplay width="800">
+            <source src="{{ url_for('serve_video', filename=videoPath) }}" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+        <script>
+            const video = document.getElementById('videoPlayer');
+            video.currentTime = parseFloat('{{time}}'); // Set thời gian bắt đầu phát
+            // console.log(`{{videoPath}}`, '{{time}}', currentTime, video)
+        </script>
+        <script>
+            document.addEventListener('keydown', function(event) {
+                const video = document.getElementById('videoPlayer');
+                if(!video) return;
+                if (event.key === 'k') {
+                    video.pause(); // Dừng video
+                } else if (event.key === 'p') {
+                    video.play(); // Phát video nếu nhấn phím 'p'
+                }
+                if (event.key === 'j') {
+                    video.currentTime -= 1; // Tua 3 giây
+                }
+                if (event.key === 'l') {
+                    video.currentTime += 1; // Quay lại 3 giây
+                }
+            });
+        </script>
+    </body>
+</html>
