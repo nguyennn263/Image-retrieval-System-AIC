@@ -143,12 +143,18 @@
             const ctx = canvas.getContext('2d');
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             const dataURL = canvas.toDataURL('image/png');
-            const frameNum = Math.floor(video.currentTime * actualFPS);
+            
+            // Calculate the frame number based on current video time and FPS
+            const currentFrameNumber = Math.floor(video.currentTime * actualFPS);
+            
+            // Format frame number with leading zeros to match keyframe naming convention
+            const displayFrameNumber = String(currentFrameNumber).padStart(8, '0');
+            
             // Show preview, video name, frame number, and download link
             document.getElementById('capture-result').innerHTML =
-                `<div style='margin-bottom:8px;'><b>Video:</b> ${videoName} &nbsp; <b>Frame:</b> ${frameNum} &nbsp; <b>Time:</b> ${video.currentTime.toFixed(2)}s &nbsp; <b>FPS:</b> ${actualFPS.toFixed(2)}</div>`+
+                `<div style='margin-bottom:8px;'><b>Video:</b> ${videoName} &nbsp; <b>Frame:</b> ${displayFrameNumber} (${currentFrameNumber}) &nbsp; <b>Time:</b> ${video.currentTime.toFixed(2)}s &nbsp; <b>FPS:</b> ${actualFPS.toFixed(2)}</div>`+
                 `<img src="${dataURL}" style="max-width:400px; border:1px solid #ccc; border-radius:6px; margin-bottom:10px;"/><br>`+
-                `<a href="${dataURL}" download="frame_${videoName}_${frameNum}.png" class="control-btn" style="background:#28a745;">Download Frame</a>`;
+                `<a href="${dataURL}" download="frame_${videoName}_${displayFrameNumber}.png" class="control-btn" style="background:#28a745;">Download Frame</a>`;
         }
         const video = document.getElementById('videoPlayer');
         const videoSource = document.getElementById('videoSource');
@@ -161,26 +167,39 @@
         const frameNumber = urlParams.get('frame') || '0';
         const startTime = parseFloat(urlParams.get('time')) || 0;
         
+        // Parse the actual frame number from the keyframe filename (remove leading zeros for calculation)
+        const actualFrameNumber = parseInt(frameNumber) || 0;
+        
         // Global variable for actual FPS
         let actualFPS = 25; // Default fallback
-        
-        // Get actual video info from API
+        let fpsLoaded = false;
+
+        // Get actual video info from API first
         fetch(`/api/video_info/${videoName}`)
             .then(response => response.json())
             .then(data => {
                 actualFPS = data.fps || 25;
+                fpsLoaded = true;
                 console.log(`Actual FPS: ${actualFPS}`);
                 // Update video details with real info
                 videoDetails.innerHTML = `
                     <p><strong>Frame:</strong> ${frameNumber} | <strong>Start Time:</strong> ${startTime.toFixed(2)}s | <strong>FPS:</strong> ${actualFPS.toFixed(2)}</p>
                 `;
+                
+                // If video is already loaded, seek to the correct frame
+                if (video.readyState >= 1) {
+                    seekToFrame();
+                }
             })
             .catch(error => {
                 console.warn('Could not get video FPS, using default 25:', error);
-            });
-        
-        // Construct video path - videos served from /videos mount point
-        const videoPath = `/videos/${videoName}.mp4`;
+                fpsLoaded = true;
+                // If video is already loaded, seek to the correct frame
+                if (video.readyState >= 1) {
+                    seekToFrame();
+                }
+            });        // Construct video path - use API endpoint to find video in correct folder
+        const videoPath = `/api/video/${videoName}`;
 
         // Update UI
         videoTitle.textContent = `Playing: ${videoName}.mp4`;
@@ -194,7 +213,10 @@
         
         // Set start time when video loads and get actual FPS
         video.addEventListener('loadedmetadata', function() {
-            video.currentTime = startTime;
+            // Set the video position with better accuracy (only if FPS is loaded)
+            if (fpsLoaded) {
+                seekToFrame();
+            }
             
             // Try to get actual video FPS (not always available)
             if (video.videoWidth && video.videoHeight) {
@@ -205,6 +227,36 @@
                 console.log(`Video: ${videoName}, Duration: ${video.duration}s, Size: ${video.videoWidth}x${video.videoHeight}`);
             }
         });
+
+        // Function to seek to the correct frame with better accuracy
+        function seekToFrame() {
+            // Calculate the correct time based on the actual frame number and FPS
+            const expectedFrame = parseInt(frameNumber) || 0;
+            const calculatedTime = expectedFrame / actualFPS;
+            
+            console.log(`Seeking to frame ${expectedFrame}: calculated time = ${calculatedTime.toFixed(3)}s (FPS: ${actualFPS})`);
+            
+            video.currentTime = calculatedTime;
+            
+            // Wait for the seek to complete, then verify position
+            video.addEventListener('seeked', function verifySeek() {
+                const actualFrame = Math.floor(video.currentTime * actualFPS);
+                
+                console.log(`Seeked to time: ${video.currentTime.toFixed(3)}s, Actual frame: ${actualFrame}, Expected frame: ${expectedFrame}`);
+                
+                // If we're off by more than 1 frame, try to adjust
+                if (Math.abs(actualFrame - expectedFrame) > 1) {
+                    console.log(`Frame mismatch detected. Trying fine adjustment...`);
+                    // Use a slightly adjusted time
+                    const correctedTime = (expectedFrame + 0.1) / actualFPS;
+                    video.currentTime = correctedTime;
+                    console.log(`Adjusted time to ${correctedTime.toFixed(3)}s`);
+                }
+                
+                // Remove this event listener after first use
+                video.removeEventListener('seeked', verifySeek);
+            }, { once: true });
+        }
         
         // Control functions
         function togglePlay() {

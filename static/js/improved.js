@@ -230,14 +230,20 @@ class ImageSearchApp {
         switch (mode) {
             case 'browse':
                 this.loadBrowseMode();
+                // Show pagination for browse mode
+                document.getElementById('pagination').style.display = 'flex';
                 break;
             case 'image-search':
                 this.clearGrid();
                 this.updateStatus('Enter image ID or upload image to search');
+                // Hide pagination for search mode
+                document.getElementById('pagination').style.display = 'none';
                 break;
             case 'text-search':
                 this.clearGrid();
                 this.updateStatus('Enter text query to search');
+                // Hide pagination for search mode
+                document.getElementById('pagination').style.display = 'none';
                 break;
         }
     }
@@ -287,7 +293,7 @@ class ImageSearchApp {
         // Check cache first
         if (this.searchCache.has(cacheKey)) {
             this.searchResults = this.searchCache.get(cacheKey);
-            this.displayImages(this.searchResults, true);
+            this.displayResults(this.searchResults);
             this.updateStatus(`Found ${this.searchResults.length} similar images to ID ${imageId} (cached)`);
             return;
         }
@@ -303,7 +309,7 @@ class ImageSearchApp {
                     },
                     body: JSON.stringify({
                         image_id: imageId,
-                        k: 200
+                        k: 500
                     })
                 });
 
@@ -323,7 +329,7 @@ class ImageSearchApp {
             // Cache results
             this.searchCache.set(cacheKey, this.searchResults);
             
-            this.displayImages(this.searchResults, true);
+            this.displayResults(this.searchResults);
             this.updateStatus(`Found ${this.searchResults.length} similar images to ID ${imageId}`);
         } catch (error) {
             console.error('Error searching by ID:', error);
@@ -341,7 +347,7 @@ class ImageSearchApp {
         // Check cache first
         if (this.searchCache.has(cacheKey)) {
             this.searchResults = this.searchCache.get(cacheKey);
-            this.displayImages(this.searchResults);
+            this.displayResults(this.searchResults);
             this.updateStatus(`Found ${this.searchResults.length} images for query: "${query}" (cached)`);
             return;
         }
@@ -357,7 +363,7 @@ class ImageSearchApp {
                     },
                     body: JSON.stringify({
                         query: query,
-                        k: 200
+                        k: 500
                     })
                 });
 
@@ -377,7 +383,7 @@ class ImageSearchApp {
             // Cache results
             this.searchCache.set(cacheKey, this.searchResults);
 
-            this.displayImages(this.searchResults, true);
+            this.displayResults(this.searchResults);
             this.updateStatus(`Found ${this.searchResults.length} images for query: "${query}"`);
         } catch (error) {
             console.error('Error searching by text:', error);
@@ -424,7 +430,7 @@ class ImageSearchApp {
             this.showLoading(true);
             const formData = new FormData();
             formData.append('image', file);
-            formData.append('k', 200);
+            formData.append('k', 500);
 
             const response = await fetch('/api/upload_search', {
                 method: 'POST',
@@ -437,7 +443,7 @@ class ImageSearchApp {
                 path: result.path
             }));
 
-            this.displayImages(this.searchResults, true);
+            this.displayResults(this.searchResults);
             this.updateStatus(`Found ${this.searchResults.length} similar images to uploaded image`);
         } catch (error) {
             console.error('Error searching by upload:', error);
@@ -484,6 +490,37 @@ class ImageSearchApp {
         } else {
             pagination.style.display = 'flex';
         }
+    }
+
+    // Display all search results without pagination
+    displayResults(results) {
+        const grid = document.getElementById('image-grid');
+        grid.innerHTML = ''; // Clear previous results
+        
+        // Hide pagination for search results
+        const pagination = document.getElementById('pagination');
+        pagination.style.display = 'none';
+
+        // Batch rendering for better performance
+        const fragment = document.createDocumentFragment();
+        
+        results.forEach((result, index) => {
+            const image = {
+                id: result.id,
+                path: result.path,
+                score: result.score
+            };
+            const card = this.createImageCard(image, index);
+            fragment.appendChild(card);
+        });
+        
+        grid.appendChild(fragment);
+        
+        // Update status
+        document.getElementById('page-info').textContent = `Showing all ${results.length} search results`;
+        
+        // Initialize lazy loading
+        this.initLazyLoading();
     }
 
     // Lazy loading for better performance
@@ -541,6 +578,9 @@ class ImageSearchApp {
                     <button class="btn-similar" onclick="app.searchSimilar(${image.id})">
                         🔍 Similar
                     </button>
+                    <button class="btn-remove-similar" onclick="app.removeSimilar(${image.id})">
+                        🗑️ Remove similar
+                    </button>
                     <button class="btn-view" onclick="app.viewImage('${image.path}')">
                         👁️ View
                     </button>
@@ -556,7 +596,8 @@ class ImageSearchApp {
         const parts = imagePath.split('/');
         const video = parts[2] || '';
         const fileName = parts[parts.length - 1] || '';
-        const frameNum = fileName.replace('.jpg', '').replace(/^0+/, '') || fileName.replace('.jpg', '');
+        // Keep the original frame number without removing leading zeros
+        const frameNum = fileName.replace('.jpg', '');
         
         return { video, frameNum };
     }
@@ -682,6 +723,70 @@ class ImageSearchApp {
         this.searchById(imageId);
     }
 
+    async removeSimilar(imageId) {
+        try {
+            // Must have current search results to filter
+            if (!this.searchResults || this.searchResults.length === 0) {
+                this.updateStatus('No search results to filter. Please perform a search first.');
+                return;
+            }
+
+            this.updateStatus('Finding similar images to remove...');
+            
+            const response = await fetch('/api/remove_similar', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    image_id: imageId,
+                    k: 100  // Get top 100 similar images
+                })
+            });
+
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+
+            // Filter current search results by removing similar images
+            const similarIdsSet = new Set(data.similar_image_ids);
+            const originalCount = this.searchResults.length;
+            
+            // Remove similar images from current results (keep about 2/3)
+            // Sort by similarity and remove top 1/3 most similar
+            const currentResults = [...this.searchResults];
+            const resultsWithSimilarity = currentResults.map(result => ({
+                ...result,
+                isSimilar: similarIdsSet.has(result.id)
+            }));
+            
+            // Separate similar and non-similar images
+            const similarImages = resultsWithSimilarity.filter(r => r.isSimilar);
+            const nonSimilarImages = resultsWithSimilarity.filter(r => !r.isSimilar);
+            
+            // Remove about 1/3 of the most similar images
+            const toRemove = Math.floor(similarImages.length * 0.33);
+            const keptSimilarImages = similarImages.slice(toRemove); // Keep the less similar ones
+            
+            // Combine kept images
+            const filteredResults = [...nonSimilarImages, ...keptSimilarImages].map(item => ({
+                id: item.id,
+                path: item.path,
+                score: item.score
+            }));
+
+            // Display filtered results
+            this.searchResults = filteredResults;
+            this.displayResults(filteredResults);
+            
+            const removedCount = originalCount - filteredResults.length;
+            this.updateStatus(`Removed ${removedCount} similar images. Showing ${filteredResults.length} of ${originalCount} results`);
+            
+        } catch (error) {
+            console.error('Error removing similar images:', error);
+            this.updateStatus('Error removing similar images');
+        }
+    }
+
     viewImage(imagePath) {
         // Open frame viewer
         const viewUrl = `/view?keyframe=${encodeURIComponent(imagePath)}`;
@@ -702,10 +807,11 @@ class ImageSearchApp {
                 console.warn('Could not get video FPS, using default 25:', error);
             }
             
+            // Parse frame number (remove leading zeros for calculation)
             const frameNum = parseInt(frame) || 0;
             const timeSeconds = frameNum / fps;
             
-            // Open video player với vid route
+            // Open video player với vid route, pass original frame string for display
             const videoUrl = `/vid?video=${video}&frame=${frame}&time=${timeSeconds}`;
             window.open(videoUrl, '_blank');
             

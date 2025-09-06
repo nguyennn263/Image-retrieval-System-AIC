@@ -66,21 +66,45 @@ if UTILS_AVAILABLE:
 
 # Load .env
 load_dotenv()
-VIDEO_FOLDER = os.getenv("VIDEO_FOLDER", "path_to_your_video_folder")
+
+# Support multiple video folders - can be comma-separated in .env
+VIDEO_FOLDERS = ['/home/nguyennn263/Documents/AIC/Dataset/Videos/video', '/media/nguyennn263/Data-Trans/AIC/video']
+# VIDEO_FOLDERS_ENV = os.getenv("VIDEO_FOLDER", "path_to_your_video_folder")
+# VIDEO_FOLDERS = [folder.strip() for folder in VIDEO_FOLDERS_ENV.split(',') if folder.strip()]
+
+logger.info(f"Configured video folders: {VIDEO_FOLDERS}")
+
+# Function to find video across all folders
+def find_video_path(video_name: str) -> str:
+    """Find video file across all configured video folders"""
+    for folder in VIDEO_FOLDERS:
+        video_path = os.path.join(folder, f"{video_name}.mp4")
+        if os.path.exists(video_path):
+            return video_path
+    return None
+
+# Function to get video folder for mounting
+def get_primary_video_folder() -> str:
+    """Get the first valid video folder for static mounting"""
+    for folder in VIDEO_FOLDERS:
+        if os.path.exists(folder):
+            return folder
+    # Return first folder even if it doesn't exist (will be created)
+    return VIDEO_FOLDERS[0] if VIDEO_FOLDERS else "videos"
 
 # Mount static files - order matters!
 app.mount("/images", StaticFiles(directory="images"), name="images")
-app.mount("/videos", StaticFiles(directory=VIDEO_FOLDER), name="videos")
+app.mount("/videos", StaticFiles(directory=get_primary_video_folder()), name="videos")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Pydantic models-
 class ImageSearchRequest(BaseModel):
     image_id: int
-    k: int = 200
+    k: int = 500
 
 class TextSearchRequest(BaseModel):
     query: str
-    k: int = 200
+    k: int = 500
 
 class SearchResult(BaseModel):
     id: int
@@ -106,6 +130,23 @@ async def view_image(request: Request, keyframe: str):
 @app.get("/vid", response_class=HTMLResponse)
 async def view_video():
     return FileResponse("static/vid_new.html")
+
+@app.get("/api/video/{video_name}")
+async def serve_video(video_name: str):
+    """Serve video file from the correct folder"""
+    try:
+        video_path = find_video_path(video_name)
+        if not video_path:
+            raise HTTPException(status_code=404, detail=f"Video {video_name}.mp4 not found")
+        
+        return FileResponse(
+            path=video_path,
+            media_type="video/mp4",
+            filename=f"{video_name}.mp4"
+        )
+    except Exception as e:
+        logger.error(f"Error serving video: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/image_paths")
 async def get_image_paths():
@@ -166,7 +207,7 @@ async def text_search(request: TextSearchRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/upload_search")
-async def upload_search(image: UploadFile = File(...), k: int = 200):
+async def upload_search(image: UploadFile = File(...), k: int = 500):
     """Search similar images by uploading an image"""
     if MyFaiss is None:
         raise HTTPException(status_code=500, detail="FAISS not initialized")
@@ -211,13 +252,41 @@ async def upload_search(image: UploadFile = File(...), k: int = 200):
         logger.error(f"Error in upload search: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/remove_similar")
+async def remove_similar(request: ImageSearchRequest):
+    """Remove similar images from current results - removes about 1/3 of similar images to the target image"""
+    if MyFaiss is None:
+        raise HTTPException(status_code=500, detail="FAISS not initialized")
+    
+    if request.image_id < 0 or request.image_id >= LenDictPath:
+        raise HTTPException(status_code=400, detail="Invalid image ID")
+    
+    try:
+        # Get similar images to the target image
+        scores, similar_ids, _, similar_paths = MyFaiss.image_search(request.image_id, k=300)
+        
+        # Convert to set for faster lookup
+        similar_ids_set = set(int(img_id) for img_id in similar_ids)
+        
+        # This will be called with current search results from frontend
+        # For now, return the similar IDs so frontend can filter current results
+        return {
+            "target_image_id": request.image_id,
+            "similar_image_ids": [int(img_id) for img_id in similar_ids[:100]],  # Top 100 most similar
+            "message": "Use this list to filter current results on frontend"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting similar images: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/video_info/{video_name}")
 async def get_video_info(video_name: str):
     """Get video metadata including FPS"""
     try:
-        video_path = os.path.join(VIDEO_FOLDER, f"{video_name}.mp4")
-        if not os.path.exists(video_path):
-            raise HTTPException(status_code=404, detail="Video not found")
+        video_path = find_video_path(video_name)
+        if not video_path:
+            raise HTTPException(status_code=404, detail=f"Video {video_name}.mp4 not found in any configured folder")
         
         # Use opencv to get video info
         cap = cv2.VideoCapture(video_path)
@@ -234,6 +303,7 @@ async def get_video_info(video_name: str):
         
         return {
             "video_name": video_name,
+            "video_path": video_path,
             "fps": fps,
             "frame_count": frame_count,
             "duration": duration,
@@ -250,7 +320,9 @@ async def health_check():
     return {
         "status": "healthy",
         "faiss_initialized": MyFaiss is not None,
-        "total_images": LenDictPath
+        "total_images": LenDictPath,
+        "video_folders": VIDEO_FOLDERS,
+        "video_folders_exist": [os.path.exists(folder) for folder in VIDEO_FOLDERS]
     }
 
 if __name__ == "__main__":
