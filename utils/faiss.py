@@ -99,7 +99,6 @@ class Myfaiss:
         if verbose:
             print(f"[Myfaiss] FAISS index (IVF) built and saved to {save_path}")
         return self.index
-
     def load_bin_file(self, bin_file: str):
         return faiss.read_index(bin_file)
     
@@ -146,11 +145,16 @@ class Myfaiss:
         scores, idx_image = self.index.search(query_feats, k=k)
         idx_image = idx_image.flatten()
 
-        infos_query = list(map(self.id2img_fps.get, list(idx_image)))
-        image_paths = [info for info in infos_query]
+        # Only keep results with valid path
+        valid_results = [(score, idx, self.id2img_fps.get(int(idx))) for score, idx in zip(scores[0], idx_image)]
+        valid_results = [r for r in valid_results if r[2] is not None]
+        # Unpack
+        scores_valid = [r[0] for r in valid_results]
+        idx_image_valid = [r[1] for r in valid_results]
+        infos_query_valid = [r[2] for r in valid_results]
+        image_paths_valid = [r[2] for r in valid_results]
 
-        
-        return scores, idx_image, infos_query, image_paths
+        return [scores_valid], idx_image_valid, infos_query_valid, image_paths_valid
     
     def text_search(self, text, k):
         if detect(text) == 'vi':
@@ -164,8 +168,13 @@ class Myfaiss:
         scores, idx_image = self.index.search(text_features, k=k)
         idx_image = idx_image.flatten()
 
-        ###### GET INFOS KEYFRAMES_ID ######
-        infos_query = list(map(self.id2img_fps.get, list(idx_image)))
-        image_paths = [info for info in infos_query]
+        # Only keep results with valid path
+        valid_results = [(score, idx, self.id2img_fps.get(int(idx))) for score, idx in zip(scores[0], idx_image)]
+        valid_results = [r for r in valid_results if r[2] is not None]
+        # Unpack
+        scores_valid = [r[0] for r in valid_results]
+        idx_image_valid = [r[1] for r in valid_results]
+        infos_query_valid = [r[2] for r in valid_results]
+        image_paths_valid = [r[2] for r in valid_results]
 
-        return scores, idx_image, infos_query, image_paths
+        return [scores_valid], idx_image_valid, infos_query_valid, image_paths_valid
